@@ -1,7 +1,7 @@
 # Copyright (c) 2015 Nicolas JOUANIN
 #
 # See the file license.txt for copying permission.
-from typing import Any, Mapping, Optional, Union
+from typing import Optional, Union
 from enum import Enum
 import ipaddress
 import logging
