@@ -18,6 +18,8 @@ from amqtt.broker import (
     EVENT_BROKER_CLIENT_SUBSCRIBED,
     EVENT_BROKER_CLIENT_UNSUBSCRIBED,
     EVENT_BROKER_MESSAGE_RECEIVED,
+    ListenerType,
+    ListenerConfig,
 )
 from amqtt.client import MQTTClient, ConnectException
 from amqtt.mqtt import (
@@ -47,6 +49,58 @@ async def async_magic():
 
 
 MagicMock.__await__ = lambda x: async_magic().__await__()
+
+
+def test_lc_decode_listenertype_tcp():
+    """
+    Test we can decode a listener type given as 'tcp'
+    """
+    lc = ListenerConfig("tcp")
+    assert lc.type == ListenerType.TCP
+
+
+def test_lc_decode_listenertype_ws():
+    """
+    Test we can decode a listener type given as 'ws'
+    """
+    lc = ListenerConfig("ws")
+    assert lc.type == ListenerType.WS
+
+
+def test_lc_decode_raw_port():
+    """
+    Test we can decode a raw port number in 'bind'
+    """
+    lc = ListenerConfig(ListenerType.TCP, bind="1883")
+    assert lc.address is None
+    assert lc.port == 1883
+
+
+def test_lc_decode_empty_addr():
+    """
+    Test we can decode a 'bind' with empty address
+    """
+    lc = ListenerConfig(ListenerType.TCP, bind=":1883")
+    assert lc.address is None
+    assert lc.port == 1883
+
+
+def test_lc_decode_v4_addr():
+    """
+    Test we can decode a 'bind' with IPv4 bind address
+    """
+    lc = ListenerConfig(ListenerType.TCP, bind="0.0.0.0:1883")
+    assert lc.address == "0.0.0.0"
+    assert lc.port == 1883
+
+
+def test_lc_decode_v6_addr():
+    """
+    Test we can decode a 'bind' with IPv6 bind address
+    """
+    lc = ListenerConfig(ListenerType.TCP, bind="[::]:1883")
+    assert lc.address == "::"
+    assert lc.port == 1883
 
 
 @pytest.mark.asyncio

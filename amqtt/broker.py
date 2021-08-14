@@ -1,7 +1,9 @@
 # Copyright (c) 2015 Nicolas JOUANIN
 #
 # See the file license.txt for copying permission.
-from typing import Optional
+from typing import Any, Mapping, Optional, Union
+from enum import Enum
+import ipaddress
 import logging
 import ssl
 import websockets
@@ -115,6 +117,114 @@ class Server:
         if self.instance:
             self.instance.close()
             await self.instance.wait_closed()
+
+
+class ListenerType(Enum):
+    """
+    Type of MQTT listener.
+
+    Two types are supprted, TCP and WebSocket.
+    """
+    TCP = "tcp"
+    WS = "ws"
+
+
+class ListenerConfig(object):
+    """
+    Configuration for a given listener.
+    """
+    # Regexes for matching specific IP address/port combos
+    # The matching of the IP address is approximate, we just want to catch enough
+    # for `ipaddress` module to do the heavy lifting.
+    IPV4_RE = re.compile(r"^([\d\.]+):(\d+)$")
+    IPV6_RE = re.compile(r"^\[([0-9a-f:]+)\]:(\d+)$", re.IGNORECASE)
+
+    def __init__(
+            self,
+            type: Union[ListenerType, str],
+            bind: Optional[str] = None,
+            max_connections: int = -1,
+            ssl_active: Union[bool, str] = False,
+            cafile: Optional[str] = None,
+            capath: Optional[str] = None,
+            cadata: Optional[str] = None,
+            certfile: Optional[str] = None,
+            keyfile: Optional[str] = None,
+    ):
+        if isinstance(type, str):
+            type = ListenerType(type)
+        self.type = type
+
+        # Define bind parameters
+        self.address: Optional[str] = None
+        self.port: Optional[int] = None
+
+        # Decode bind arguments.  We accept:
+        #
+        # 1883              - Port number only (listen all interfaces)
+        # :1883             - Port number only (listen all interfaces)
+        # 0.0.0.0:1883      - IPv4 address
+        # [::]:1883         - IPv6 address
+        #
+        # We filter the address string through `ipaddress` to validate it.
+        if bind is not None:
+            try:
+                str_address: Optional[str] = None
+                str_port: Optional[str] = None
+
+                match_v6 = self.IPV6_RE.match(bind)
+                if match_v6:
+                    (str_address, str_port) = match_v6.groups()
+                    self.address = str(ipaddress.IPv6Address(str_address))
+                else:
+                    match_v4 = self.IPV4_RE.match(bind)
+                    if match_v4:
+                        (str_address, str_port) = match_v4.groups()
+                        self.address = str(ipaddress.IPv4Address(str_address))
+                    elif bind.startswith(':'):
+                        # Empty address
+                        (_, str_port) = bind.rsplit(':', 1)
+                    else:
+                        str_port = bind
+
+                self.port = int(str_port)
+            except ValueError as e:
+                raise BrokerException(
+                        "Invalid address given in bind value: %r" % (bind,)
+                ) from e
+        else:
+            self.address = None
+            self.port = None
+
+        self.max_connections = max_connections
+
+        if isinstance(ssl_active, str):
+            ssl_active = (ssl_active.upper() == "ON")
+
+        if ssl_active is True:
+            # certfile and keyfile are mandatory here
+            if certfile is None:
+                raise BrokerException("'certfile' is mandatory when SSL is enabled")
+            if keyfile is None:
+                raise BrokerException("'keyfile' is mandatory when SSL is enabled")
+
+            try:
+                sc = ssl.create_default_context(
+                    ssl.Purpose.CLIENT_AUTH,
+                    cafile=cafile,
+                    capath=capath,
+                    cadata=cadata,
+                )
+                sc.load_cert_chain(certfile, keyfile)
+                sc.verify_mode = ssl.CERT_OPTIONAL
+                self.ssl = sc
+            except FileNotFoundError as fnfe:
+                raise BrokerException(
+                    "Can't read cert files '%s' or '%s' : %s"
+                    % (listener["certfile"], listener["keyfile"], fnfe)
+                ) from fnfe
+        else:
+            self.ssl = None
 
 
 class BrokerContext(BaseContext):
@@ -257,87 +367,57 @@ class Broker:
         await self.plugins_manager.fire_event(EVENT_BROKER_PRE_START)
         try:
             # Start network listeners
-            for listener_name in self.listeners_config:
-                listener = self.listeners_config[listener_name]
+            for listener_name, listener_config in self.listeners_config.items():
+                listener = ListenerConfig(**listener_config)
 
-                if "bind" not in listener:
+                if listener.port is None:
                     self.logger.debug(
-                        "Listener configuration '%s' is not bound" % listener_name
+                        "Listener configuration '%s' is not bound",
+                        listener_name
                     )
                     continue
 
-                max_connections = listener.get("max_connections", -1)
-
-                # SSL Context
-                sc = None
-
-                # accept string "on" / "off" or boolean
-                ssl_active = listener.get("ssl", False)
-                if isinstance(ssl_active, str):
-                    ssl_active = ssl_active.upper() == "ON"
-
-                if ssl_active:
-                    try:
-                        sc = ssl.create_default_context(
-                            ssl.Purpose.CLIENT_AUTH,
-                            cafile=listener.get("cafile"),
-                            capath=listener.get("capath"),
-                            cadata=listener.get("cadata"),
-                        )
-                        sc.load_cert_chain(listener["certfile"], listener["keyfile"])
-                        sc.verify_mode = ssl.CERT_OPTIONAL
-                    except KeyError as ke:
-                        raise BrokerException(
-                            "'certfile' or 'keyfile' configuration parameter missing: %s"
-                            % ke
-                        )
-                    except FileNotFoundError as fnfe:
-                        raise BrokerException(
-                            "Can't read cert files '%s' or '%s' : %s"
-                            % (listener["certfile"], listener["keyfile"], fnfe)
-                        )
-
-                address, s_port = listener["bind"].split(":")
-                port = 0
-                try:
-                    port = int(s_port)
-                except ValueError:
-                    raise BrokerException(
-                        "Invalid port value in bind value: %s" % listener["bind"]
-                    )
-
-                if listener["type"] == "tcp":
+                if listener.type == ListenerType.TCP:
                     cb_partial = partial(
                         self.stream_connected, listener_name=listener_name
                     )
                     instance = await asyncio.start_server(
                         cb_partial,
-                        address,
-                        port,
+                        listener.address,
+                        listener.port,
                         reuse_address=True,
-                        ssl=sc,
+                        ssl=listener.ssl,
                         loop=self._loop,
                     )
                     self._servers[listener_name] = Server(
-                        listener_name, instance, max_connections, self._loop
+                        listener_name,
+                        instance,
+                        listener.max_connections,
+                        self._loop
                     )
-                elif listener["type"] == "ws":
+                elif listener.type == ListenerType.WS:
                     cb_partial = partial(self.ws_connected, listener_name=listener_name)
                     instance = await websockets.serve(
                         cb_partial,
-                        address,
-                        port,
-                        ssl=sc,
+                        listener.address,
+                        listener.port,
+                        ssl=listener.ssl,
                         loop=self._loop,
                         subprotocols=["mqtt"],
                     )
                     self._servers[listener_name] = Server(
-                        listener_name, instance, max_connections, self._loop
+                        listener_name,
+                        instance,
+                        listener.max_connections,
+                        self._loop
                     )
 
                 self.logger.info(
-                    "Listener '%s' bind to %s (max_connections=%d)"
-                    % (listener_name, listener["bind"], max_connections)
+                    "Listener '%s' bind to %s:%d (max_connections=%d)",
+                    listener_name,
+                    listener.address or 'any',
+                    listener.port,
+                    listener.max_connections
                 )
 
             self.transitions.starting_success()
@@ -350,9 +430,9 @@ class Broker:
 
             self.logger.debug("Broker started")
         except Exception as e:
-            self.logger.error("Broker startup failed: %s" % e)
+            self.logger.error("Broker startup failed", exc_info=True)
             self.transitions.starting_fail()
-            raise BrokerException("Broker instance can't be started: %s" % e)
+            raise BrokerException("Broker instance can't be started: %s" % e) from e
 
     async def shutdown(self):
         """
