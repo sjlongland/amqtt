@@ -167,7 +167,7 @@ class ListenerConfig(object):
         # [::]:1883         - IPv6 address
         #
         # We filter the address string through `ipaddress` to validate it.
-        if bind is not None:
+        if bind:
             try:
                 str_address: Optional[str] = None
                 str_port: Optional[str] = None
