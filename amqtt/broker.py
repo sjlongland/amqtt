@@ -125,6 +125,7 @@ class ListenerType(Enum):
 
     Two types are supprted, TCP and WebSocket.
     """
+
     TCP = "tcp"
     WS = "ws"
 
@@ -133,17 +134,18 @@ class ListenerConfig(object):
     """
     Configuration for a given listener.
     """
+
     def __init__(
-            self,
-            type: Union[ListenerType, str],
-            bind: Optional[str] = None,
-            max_connections: int = -1,
-            ssl_active: Union[bool, str] = False,
-            cafile: Optional[str] = None,
-            capath: Optional[str] = None,
-            cadata: Optional[str] = None,
-            certfile: Optional[str] = None,
-            keyfile: Optional[str] = None,
+        self,
+        type: Union[ListenerType, str],
+        bind: Optional[str] = None,
+        max_connections: int = -1,
+        ssl_active: Union[bool, str] = False,
+        cafile: Optional[str] = None,
+        capath: Optional[str] = None,
+        cadata: Optional[str] = None,
+        certfile: Optional[str] = None,
+        keyfile: Optional[str] = None,
     ):
         if isinstance(type, str):
             type = ListenerType(type)
@@ -186,7 +188,7 @@ class ListenerConfig(object):
         self.max_connections = max_connections
 
         if isinstance(ssl_active, str):
-            ssl_active = (ssl_active.upper() == "ON")
+            ssl_active = ssl_active.upper() == "ON"
 
         if ssl_active is True:
             # certfile and keyfile are mandatory here
@@ -359,8 +361,7 @@ class Broker:
 
                 if listener.port is None:
                     self.logger.debug(
-                        "Listener configuration '%s' is not bound",
-                        listener_name
+                        "Listener configuration '%s' is not bound", listener_name
                     )
                     continue
 
@@ -377,10 +378,7 @@ class Broker:
                         loop=self._loop,
                     )
                     self._servers[listener_name] = Server(
-                        listener_name,
-                        instance,
-                        listener.max_connections,
-                        self._loop
+                        listener_name, instance, listener.max_connections, self._loop
                     )
                 elif listener.type == ListenerType.WS:
                     cb_partial = partial(self.ws_connected, listener_name=listener_name)
@@ -393,18 +391,15 @@ class Broker:
                         subprotocols=["mqtt"],
                     )
                     self._servers[listener_name] = Server(
-                        listener_name,
-                        instance,
-                        listener.max_connections,
-                        self._loop
+                        listener_name, instance, listener.max_connections, self._loop
                     )
 
                 self.logger.info(
                     "Listener '%s' bind to %s:%d (max_connections=%d)",
                     listener_name,
-                    listener.address or 'any',
+                    listener.address or "any",
                     listener.port,
-                    listener.max_connections
+                    listener.max_connections,
                 )
 
             self.transitions.starting_success()
