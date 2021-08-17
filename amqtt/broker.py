@@ -9,6 +9,7 @@ import ssl
 import websockets
 import asyncio
 import re
+import urllib.parse
 from asyncio import CancelledError
 from collections import deque
 from enum import Enum
@@ -133,12 +134,6 @@ class ListenerConfig(object):
     """
     Configuration for a given listener.
     """
-    # Regexes for matching specific IP address/port combos
-    # The matching of the IP address is approximate, we just want to catch enough
-    # for `ipaddress` module to do the heavy lifting.
-    IPV4_RE = re.compile(r"^([\d\.]+):(\d+)$")
-    IPV6_RE = re.compile(r"^\[([0-9a-f:]+)\]:(\d+)$", re.IGNORECASE)
-
     def __init__(
             self,
             type: Union[ListenerType, str],
@@ -169,25 +164,18 @@ class ListenerConfig(object):
         # We filter the address string through `ipaddress` to validate it.
         if bind:
             try:
-                str_address: Optional[str] = None
-                str_port: Optional[str] = None
+                uri = urllib.parse.urlsplit("//%s" % bind)
 
-                match_v6 = self.IPV6_RE.match(bind)
-                if match_v6:
-                    (str_address, str_port) = match_v6.groups()
-                    self.address = str(ipaddress.IPv6Address(str_address))
+                if uri.port:
+                    self.port = uri.port
+
+                    if uri.hostname:
+                        # Validate IP address part
+                        self.address = str(ipaddress.ip_address(uri.hostname))
                 else:
-                    match_v4 = self.IPV4_RE.match(bind)
-                    if match_v4:
-                        (str_address, str_port) = match_v4.groups()
-                        self.address = str(ipaddress.IPv4Address(str_address))
-                    elif bind.startswith(':'):
-                        # Empty address
-                        (_, str_port) = bind.rsplit(':', 1)
-                    else:
-                        str_port = bind
-
-                self.port = int(str_port)
+                    # Maybe we were given the port on its own?
+                    self.address = None
+                    self.port = int(uri.hostname)
             except ValueError as e:
                 raise BrokerException(
                         "Invalid address given in bind value: %r" % (bind,)
