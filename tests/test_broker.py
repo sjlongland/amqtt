@@ -20,6 +20,7 @@ from amqtt.broker import (
     EVENT_BROKER_MESSAGE_RECEIVED,
     ListenerType,
     ListenerConfig,
+    BrokerException,
 )
 from amqtt.client import MQTTClient, ConnectException
 from amqtt.mqtt import (
@@ -101,6 +102,28 @@ def test_lc_decode_v6_addr():
     lc = ListenerConfig(ListenerType.TCP, bind="[::]:1883")
     assert lc.address == "::"
     assert lc.port == 1883
+
+
+def test_lc_decode_no_port():
+    """
+    Test an address without a port raises an error
+    """
+    try:
+        ListenerConfig(ListenerType.TCP, bind="[::]")
+        assert False, "Should not have been accepted"
+    except BrokerException as e:
+        assert str(e) == "Invalid address given in bind value: '[::]'"
+
+
+def test_lc_decode_hostname():
+    """
+    Test a hostname (not IP) raises an error
+    """
+    try:
+        ListenerConfig(ListenerType.TCP, bind="localhost:1883")
+        assert False, "Should not have been accepted"
+    except BrokerException as e:
+        assert str(e) == "Invalid address given in bind value: 'localhost:1883'"
 
 
 @pytest.mark.asyncio
