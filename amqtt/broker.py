@@ -12,7 +12,6 @@ import re
 import urllib.parse
 from asyncio import CancelledError
 from collections import deque
-from enum import Enum
 
 from functools import partial
 from transitions import Machine, MachineError
