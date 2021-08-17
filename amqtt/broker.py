@@ -178,7 +178,7 @@ class ListenerConfig(object):
                     self.port = int(uri.hostname)
             except ValueError as e:
                 raise BrokerException(
-                        "Invalid address given in bind value: %r" % (bind,)
+                    "Invalid address given in bind value: %r" % (bind,)
                 ) from e
         else:
             self.address = None
@@ -209,7 +209,7 @@ class ListenerConfig(object):
             except FileNotFoundError as fnfe:
                 raise BrokerException(
                     "Can't read cert files '%s' or '%s' : %s"
-                    % (listener["certfile"], listener["keyfile"], fnfe)
+                    % (certfile, keyfile, fnfe)
                 ) from fnfe
         else:
             self.ssl = None
